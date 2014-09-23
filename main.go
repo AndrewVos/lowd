@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httputil"
 	"os"
 	"strings"
 	"time"
@@ -42,7 +44,7 @@ func (t *Timer) Stop() {
 	t.Running = false
 }
 
-func record() {
+func launchRecorder() {
 	timer := &Timer{}
 	defer timer.Stop()
 
@@ -66,7 +68,7 @@ func record() {
 	log.Fatal(http.ListenAndServe(":8090", proxy))
 }
 
-func test() {
+func runLoadTest(writeResponseHeaders bool, writeResponseBody bool, writeTimeElapsed bool) {
 	file, err := os.Open("output.txt")
 	if err != nil {
 		log.Fatal(err)
@@ -103,11 +105,32 @@ func test() {
 				if err != nil {
 					log.Fatal(err)
 				}
+				start := time.Now()
 				response, err := client.Do(request)
 				if err != nil {
 					log.Println("Error during request:", err)
 				}
-				fmt.Printf("%+v\n", response)
+				if writeResponseHeaders {
+					r, err := httputil.DumpResponse(response, false)
+					if err != nil {
+						log.Fatal(err)
+					}
+					fmt.Println(strings.TrimSpace(string(r)))
+				}
+				if writeResponseBody {
+					b, err := ioutil.ReadAll(response.Body)
+					if err != nil {
+						log.Fatal(err)
+					}
+					fmt.Println(string(b))
+				}
+				response.Body.Close()
+				if writeTimeElapsed {
+					elapsed := time.Since(start)
+					fmt.Printf(colour.Blue("took: %s\n"), elapsed)
+				}
+				fmt.Println()
+
 				break
 			}
 			time.Sleep(100 * time.Millisecond)
@@ -116,13 +139,24 @@ func test() {
 }
 
 func main() {
-	if len(os.Args) == 1 {
-		fmt.Println("Usage: lowd [record|test]")
-		return
-	} else if os.Args[1] == "record" {
-		record()
-	} else if os.Args[1] == "test" {
-		test()
+	record := flag.Bool("record", false, "start the proxy recorder")
+	test := flag.Bool("test", false, "start a load test")
+	coloursEnabled := flag.Bool("colour", true, "write output in colour")
+	writeResponseHeaders := flag.Bool("write-response-headers", false, "when running a load test, write the response headers out")
+	writeResponseBody := flag.Bool("write-response-body", false, "when running a load test, write the response body out")
+	writeTimeElapsed := flag.Bool("write-time-elapsed", true, "when running a load test write the time elapsed for each request")
+
+	flag.Parse()
+
+	colour.Enabled = *coloursEnabled
+
+	if !*record && !*test {
+		flag.Usage()
+	}
+	if *record {
+		launchRecorder()
+	} else if *test {
+		runLoadTest(*writeResponseHeaders, *writeResponseBody, *writeTimeElapsed)
 	}
 }
 
