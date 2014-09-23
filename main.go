@@ -57,6 +57,7 @@ func launchRecorder(port int) {
 			timer.Start()
 		}
 
+		fmt.Printf(colour.Yellow("%v %v\n"), req.Method, req.URL)
 		err := storeRequest(timer.Current, req)
 		if err != nil {
 			log.Fatal("Error storing request:", err)
