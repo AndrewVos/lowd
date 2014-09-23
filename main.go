@@ -12,6 +12,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httputil"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,7 +45,7 @@ func (t *Timer) Stop() {
 	t.Running = false
 }
 
-func launchRecorder() {
+func launchRecorder(port int) {
 	timer := &Timer{}
 	defer timer.Stop()
 
@@ -65,7 +66,9 @@ func launchRecorder() {
 	})
 
 	// proxy.Verbose = true
-	log.Fatal(http.ListenAndServe(":8090", proxy))
+	fmt.Printf("Starting recorder on %v\n", port)
+
+	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(port), proxy))
 }
 
 func runLoadTest(writeResponseHeaders bool, writeResponseBody bool, writeTimeElapsed bool) {
@@ -142,6 +145,8 @@ func main() {
 	record := flag.Bool("record", false, "start the proxy recorder")
 	test := flag.Bool("test", false, "start a load test")
 	coloursEnabled := flag.Bool("colour", true, "write output in colour")
+	port := flag.Int("port", 8090, "when recording, the port to bind to")
+
 	writeResponseHeaders := flag.Bool("write-response-headers", false, "when running a load test, write the response headers out")
 	writeResponseBody := flag.Bool("write-response-body", false, "when running a load test, write the response body out")
 	writeResponseTime := flag.Bool("write-response-time", true, "when running a load test write the response time for each request")
@@ -154,7 +159,7 @@ func main() {
 		flag.Usage()
 	}
 	if *record {
-		launchRecorder()
+		launchRecorder(*port)
 	} else if *test {
 		runLoadTest(*writeResponseHeaders, *writeResponseBody, *writeResponseTime)
 	}
