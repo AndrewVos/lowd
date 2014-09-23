@@ -127,7 +127,7 @@ func runLoadTest(writeResponseHeaders bool, writeResponseBody bool, writeTimeEla
 				response.Body.Close()
 				if writeTimeElapsed {
 					elapsed := time.Since(start)
-					fmt.Printf(colour.Blue("took: %s\n"), elapsed)
+					fmt.Printf(colour.Blue("response time: %s\n"), elapsed)
 				}
 				fmt.Println()
 
@@ -144,7 +144,7 @@ func main() {
 	coloursEnabled := flag.Bool("colour", true, "write output in colour")
 	writeResponseHeaders := flag.Bool("write-response-headers", false, "when running a load test, write the response headers out")
 	writeResponseBody := flag.Bool("write-response-body", false, "when running a load test, write the response body out")
-	writeTimeElapsed := flag.Bool("write-time-elapsed", true, "when running a load test write the time elapsed for each request")
+	writeResponseTime := flag.Bool("write-response-time", true, "when running a load test write the response time for each request")
 
 	flag.Parse()
 
@@ -156,7 +156,7 @@ func main() {
 	if *record {
 		launchRecorder()
 	} else if *test {
-		runLoadTest(*writeResponseHeaders, *writeResponseBody, *writeTimeElapsed)
+		runLoadTest(*writeResponseHeaders, *writeResponseBody, *writeResponseTime)
 	}
 }
 
