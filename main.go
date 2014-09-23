@@ -1,16 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/AndrewVos/colour"
 	"github.com/elazarl/goproxy"
 )
 
@@ -68,6 +71,52 @@ func record() {
 }
 
 func test() {
+	file, err := os.Open("output.txt")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	var storedRequests []Request
+	for scanner.Scan() {
+		var request Request
+		err := json.Unmarshal([]byte(scanner.Text()), &request)
+		if err != nil {
+			log.Fatal(err)
+		}
+		storedRequests = append(storedRequests, request)
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	cookieJar, _ := cookiejar.New(nil)
+	client := &http.Client{
+		Jar: cookieJar,
+	}
+
+	timer := &Timer{}
+	timer.Start()
+	defer timer.Stop()
+	for _, storedRequest := range storedRequests {
+		for {
+			if storedRequest.Time <= timer.Current {
+				fmt.Printf(colour.Yellow("%v %v\n"), storedRequest.Method, storedRequest.URL)
+				request, err := http.NewRequest(storedRequest.Method, storedRequest.URL, strings.NewReader(storedRequest.Body))
+				if err != nil {
+					log.Fatal(err)
+				}
+				response, err := client.Do(request)
+				if err != nil {
+					log.Println("Error during request:", err)
+				}
+				fmt.Printf("%+v\n", response)
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 }
 
 func main() {
