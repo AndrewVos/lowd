@@ -47,18 +47,13 @@ func record() {
 	defer timer.Stop()
 
 	proxy := goproxy.NewProxyHttpServer()
+	proxy.OnRequest().HandleConnect(goproxy.AlwaysMitm)
+
 	proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 		if timer.Running == false {
 			timer.Start()
 		}
-		if strings.HasPrefix(req.URL.Host, "-") {
-			req.URL.Scheme = "https"
 
-			newHost := req.URL.Host[1:]
-			req.URL.Host = newHost
-			req.Host = newHost
-			req.Header.Set("Host", newHost)
-		}
 		err := storeRequest(timer.Current, req)
 		if err != nil {
 			log.Fatal("Error storing request:", err)
@@ -66,6 +61,7 @@ func record() {
 
 		return req, nil
 	})
+
 	// proxy.Verbose = true
 	log.Fatal(http.ListenAndServe(":8090", proxy))
 }
@@ -165,7 +161,7 @@ func storeRequest(requestTime int, request *http.Request) error {
 		Header: request.Header,
 		Body:   string(body),
 	}
-	// record headers, cookies, body, request time
+
 	b, err := json.Marshal(jsonRequest)
 	if err != nil {
 		return err
