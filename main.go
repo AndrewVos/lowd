@@ -146,7 +146,7 @@ func runLoadTest() {
 		}
 		fmt.Printf("Current clients: %v\n", currentClients)
 		currentDuration := time.Since(startTime)
-		if currentDuration.Seconds() >= *duration {
+		if currentDuration >= *duration {
 			fmt.Printf(colour.Blue("Waiting for %v clients to complete...\n"), currentClients)
 			if currentClients == 0 {
 				close(clientResults)
@@ -286,7 +286,7 @@ var writeResponseHeaders *bool
 var writeResponseBody *bool
 var writeResponseTime *bool
 var summary *bool
-var duration *float64
+var duration *time.Duration
 var maximumClients *int
 
 func main() {
@@ -300,7 +300,7 @@ func main() {
 	writeResponseBody = flag.Bool("write-response-body", false, "when running a load test, write the response body out")
 	writeResponseTime = flag.Bool("write-response-time", true, "when running a load test, write the response time for each request")
 	summary = flag.Bool("summary", true, "when running a load test, display a summary at the end")
-	duration = flag.Float64("duration", 300, "when running a load test, the duration in seconds")
+	duration = flag.Duration("duration", time.Duration(300)*time.Second, "when running a load test, the duration during when new clients will be spawned (http://golang.org/pkg/time/#ParseDuration)")
 	maximumClients = flag.Int("maximum-clients", 10, "when running a load test, the maximum amount of clients")
 
 	flag.Parse()
