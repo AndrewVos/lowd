@@ -72,7 +72,7 @@ func launchRecorder(port int) {
 	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(port), proxy))
 }
 
-func runLoadTest(writeResponseHeaders bool, writeResponseBody bool, writeTimeElapsed bool) {
+func runLoadTest() {
 	file, err := os.Open("output.txt")
 	if err != nil {
 		log.Fatal(err)
@@ -93,6 +93,37 @@ func runLoadTest(writeResponseHeaders bool, writeResponseBody bool, writeTimeEla
 		log.Fatal(err)
 	}
 
+	clientNumber := 0
+	currentClients := 0
+	results := make(chan string)
+
+	for i := 0; i < *maximumClients; i++ {
+		clientNumber += 1
+		currentClients += 1
+		go singleClientTest(clientNumber, results, storedRequests)
+	}
+
+	startTime := time.Now()
+
+	for nextResult := range results {
+		clientNumber += 1
+		currentClients -= 1
+		fmt.Println(nextResult)
+		fmt.Printf("Current clients: %v\n", currentClients)
+		currentDuration := time.Since(startTime)
+		if currentDuration.Seconds() >= *duration {
+			fmt.Printf(colour.Blue("Waiting for %v clients to complete...\n"), currentClients)
+			if currentClients == 0 {
+				close(results)
+			}
+			continue
+		}
+		currentClients += 1
+		go singleClientTest(clientNumber, results, storedRequests)
+	}
+}
+
+func singleClientTest(clientNumber int, results chan string, storedRequests []Request) {
 	cookieJar, _ := cookiejar.New(nil)
 	client := &http.Client{
 		Jar: cookieJar,
@@ -101,10 +132,13 @@ func runLoadTest(writeResponseHeaders bool, writeResponseBody bool, writeTimeEla
 	timer := &Timer{}
 	timer.Start()
 	defer timer.Stop()
+
+	result := fmt.Sprintf(colour.Green("Client #%v\n"), clientNumber)
+
 	for _, storedRequest := range storedRequests {
 		for {
 			if storedRequest.Time <= timer.Current {
-				fmt.Printf(colour.Yellow("%v %v\n"), storedRequest.Method, storedRequest.URL)
+				result += fmt.Sprintf(colour.Yellow("%v %v\n"), storedRequest.Method, storedRequest.URL)
 				request, err := http.NewRequest(storedRequest.Method, storedRequest.URL, strings.NewReader(storedRequest.Body))
 				if err != nil {
 					log.Fatal(err)
@@ -112,35 +146,44 @@ func runLoadTest(writeResponseHeaders bool, writeResponseBody bool, writeTimeEla
 				start := time.Now()
 				response, err := client.Do(request)
 				if err != nil {
-					log.Println("Error during request:", err)
+					result += fmt.Sprintf(colour.Red("Error during request:\n%v\n"), err)
+					break
 				}
-				if writeResponseHeaders {
+				if *writeResponseHeaders {
 					r, err := httputil.DumpResponse(response, false)
 					if err != nil {
 						log.Fatal(err)
 					}
-					fmt.Println(strings.TrimSpace(string(r)))
+					result += strings.TrimSpace(string(r)) + "\n"
 				}
-				if writeResponseBody {
+				if *writeResponseBody {
 					b, err := ioutil.ReadAll(response.Body)
 					if err != nil {
 						log.Fatal(err)
 					}
-					fmt.Println(string(b))
+					result += string(b) + "\n"
 				}
-				response.Body.Close()
-				if writeTimeElapsed {
+				if response.Body != nil {
+					response.Body.Close()
+				}
+				if *writeResponseTime {
 					elapsed := time.Since(start)
-					fmt.Printf(colour.Blue("response time: %s\n"), elapsed)
+					result += fmt.Sprintf(colour.Blue("response time: %s\n"), elapsed)
 				}
-				fmt.Println()
 
 				break
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
+	results <- result
 }
+
+var writeResponseHeaders *bool
+var writeResponseBody *bool
+var writeResponseTime *bool
+var duration *float64
+var maximumClients *int
 
 func main() {
 	record := flag.Bool("record", false, "start the proxy recorder")
@@ -148,9 +191,11 @@ func main() {
 	coloursEnabled := flag.Bool("colour", true, "write output in colour")
 	port := flag.Int("port", 8090, "when recording, the port to bind to")
 
-	writeResponseHeaders := flag.Bool("write-response-headers", false, "when running a load test, write the response headers out")
-	writeResponseBody := flag.Bool("write-response-body", false, "when running a load test, write the response body out")
-	writeResponseTime := flag.Bool("write-response-time", true, "when running a load test write the response time for each request")
+	writeResponseHeaders = flag.Bool("write-response-headers", false, "when running a load test, write the response headers out")
+	writeResponseBody = flag.Bool("write-response-body", false, "when running a load test, write the response body out")
+	writeResponseTime = flag.Bool("write-response-time", true, "when running a load test write the response time for each request")
+	duration = flag.Float64("duration", 300, "when running a load test, the duration in seconds")
+	maximumClients = flag.Int("maximum-clients", 10, "when running a load test, the maximum amount of clients")
 
 	flag.Parse()
 
@@ -162,7 +207,7 @@ func main() {
 	if *record {
 		launchRecorder(*port)
 	} else if *test {
-		runLoadTest(*writeResponseHeaders, *writeResponseBody, *writeResponseTime)
+		runLoadTest()
 	}
 }
 
