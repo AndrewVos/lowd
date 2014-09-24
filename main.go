@@ -12,6 +12,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httputil"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -95,35 +96,115 @@ func runLoadTest() {
 
 	clientNumber := 0
 	currentClients := 0
-	results := make(chan string)
+	clientResults := make(chan ClientResult)
 
 	for i := 0; i < *maximumClients; i++ {
 		clientNumber += 1
 		currentClients += 1
-		go singleClientTest(clientNumber, results, storedRequests)
+		go singleClientTest(clientNumber, clientResults, storedRequests)
 	}
 
 	startTime := time.Now()
 
-	for nextResult := range results {
+	var allClientResults []ClientResult
+	for clientResult := range clientResults {
+		allClientResults = append(allClientResults, clientResult)
 		clientNumber += 1
 		currentClients -= 1
-		fmt.Println(nextResult)
+		fmt.Println(fmt.Sprintf(colour.Green("Client #%v"), clientResult.ClientNumber))
+		for _, requestResult := range clientResult.Results {
+			fmt.Println(colour.Yellow(requestResult.Title))
+			if requestResult.Error != nil {
+				fmt.Printf(colour.Red("Error during request:\n%v\n"), err)
+			}
+
+			if *writeResponseHeaders {
+				fmt.Println(requestResult.Headers)
+			}
+			if *writeResponseBody {
+				fmt.Println(requestResult.Body)
+			}
+			if *writeResponseTime {
+				fmt.Printf(colour.Blue("response time: %s\n"), requestResult.ResponseTime)
+			}
+
+		}
 		fmt.Printf("Current clients: %v\n", currentClients)
 		currentDuration := time.Since(startTime)
 		if currentDuration.Seconds() >= *duration {
 			fmt.Printf(colour.Blue("Waiting for %v clients to complete...\n"), currentClients)
 			if currentClients == 0 {
-				close(results)
+				close(clientResults)
 			}
 			continue
 		}
 		currentClients += 1
-		go singleClientTest(clientNumber, results, storedRequests)
+		go singleClientTest(clientNumber, clientResults, storedRequests)
+	}
+
+	if *summary {
+		printSummary(allClientResults)
 	}
 }
 
-func singleClientTest(clientNumber int, results chan string, storedRequests []Request) {
+func printSummary(allClientResults []ClientResult) {
+	fmt.Println("------------------")
+	fmt.Println("------SUMMARY-----")
+	fmt.Println("------------------")
+	var allRequestResults RequestResults
+	for _, clientResult := range allClientResults {
+		for _, requestResult := range clientResult.Results {
+			allRequestResults = append(allRequestResults, requestResult)
+		}
+	}
+	sort.Sort(allRequestResults)
+	fastestResponseTimes := map[string]time.Duration{}
+	slowestResponseTimes := map[string]time.Duration{}
+	for _, requestResult := range allRequestResults {
+		if v, ok := fastestResponseTimes[requestResult.Title]; ok {
+			if requestResult.ResponseTime < v {
+				fastestResponseTimes[requestResult.Title] = requestResult.ResponseTime
+			}
+		} else {
+			fastestResponseTimes[requestResult.Title] = requestResult.ResponseTime
+		}
+
+		if v, ok := slowestResponseTimes[requestResult.Title]; ok {
+			if requestResult.ResponseTime > v {
+				slowestResponseTimes[requestResult.Title] = requestResult.ResponseTime
+			}
+		} else {
+			slowestResponseTimes[requestResult.Title] = requestResult.ResponseTime
+		}
+	}
+	fmt.Println("Response times per URL")
+	for title, value := range fastestResponseTimes {
+		fastest := fmt.Sprintf(colour.Green("fastest: %s"), value)
+		slowest := fmt.Sprintf(colour.Red("slowest: %s"), slowestResponseTimes[title])
+		fmt.Printf(colour.Yellow("%v\n%v\n%v\n"), title, fastest, slowest)
+	}
+}
+
+type RequestResults []RequestResult
+
+func (r RequestResults) Len() int           { return len(r) }
+func (r RequestResults) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+func (r RequestResults) Less(i, j int) bool { return r[i].ResponseTime < r[j].ResponseTime }
+
+type ClientResult struct {
+	ClientNumber int
+	Results      RequestResults
+}
+
+type RequestResult struct {
+	Title        string
+	Error        error
+	Headers      string
+	Body         string
+	ResponseTime time.Duration
+}
+
+func singleClientTest(clientNumber int, clientResults chan ClientResult, storedRequests []Request) {
 	cookieJar, _ := cookiejar.New(nil)
 	client := &http.Client{
 		Jar: cookieJar,
@@ -133,12 +214,14 @@ func singleClientTest(clientNumber int, results chan string, storedRequests []Re
 	timer.Start()
 	defer timer.Stop()
 
-	result := fmt.Sprintf(colour.Green("Client #%v\n"), clientNumber)
+	clientResult := ClientResult{ClientNumber: clientNumber}
 
 	for _, storedRequest := range storedRequests {
 		for {
 			if storedRequest.Time <= timer.Current {
-				result += fmt.Sprintf(colour.Yellow("%v %v\n"), storedRequest.Method, storedRequest.URL)
+				result := RequestResult{
+					Title: fmt.Sprintf("%v %v", storedRequest.Method, storedRequest.URL),
+				}
 				request, err := http.NewRequest(storedRequest.Method, storedRequest.URL, strings.NewReader(storedRequest.Body))
 				if err != nil {
 					log.Fatal(err)
@@ -146,42 +229,38 @@ func singleClientTest(clientNumber int, results chan string, storedRequests []Re
 				start := time.Now()
 				response, err := client.Do(request)
 				if err != nil {
-					result += fmt.Sprintf(colour.Red("Error during request:\n%v\n"), err)
+					result.Error = err
 					break
 				}
-				if *writeResponseHeaders {
-					r, err := httputil.DumpResponse(response, false)
-					if err != nil {
-						log.Fatal(err)
-					}
-					result += strings.TrimSpace(string(r)) + "\n"
+
+				r, err := httputil.DumpResponse(response, false)
+				if err != nil {
+					log.Fatal(err)
 				}
-				if *writeResponseBody {
-					b, err := ioutil.ReadAll(response.Body)
-					if err != nil {
-						log.Fatal(err)
-					}
-					result += string(b) + "\n"
+				result.Headers = strings.TrimSpace(string(r))
+				b, err := ioutil.ReadAll(response.Body)
+				if err != nil {
+					log.Fatal(err)
 				}
+				result.Body = string(b)
 				if response.Body != nil {
 					response.Body.Close()
 				}
-				if *writeResponseTime {
-					elapsed := time.Since(start)
-					result += fmt.Sprintf(colour.Blue("response time: %s\n"), elapsed)
-				}
+				result.ResponseTime = time.Since(start)
+				clientResult.Results = append(clientResult.Results, result)
 
 				break
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
-	results <- result
+	clientResults <- clientResult
 }
 
 var writeResponseHeaders *bool
 var writeResponseBody *bool
 var writeResponseTime *bool
+var summary *bool
 var duration *float64
 var maximumClients *int
 
@@ -193,7 +272,8 @@ func main() {
 
 	writeResponseHeaders = flag.Bool("write-response-headers", false, "when running a load test, write the response headers out")
 	writeResponseBody = flag.Bool("write-response-body", false, "when running a load test, write the response body out")
-	writeResponseTime = flag.Bool("write-response-time", true, "when running a load test write the response time for each request")
+	writeResponseTime = flag.Bool("write-response-time", true, "when running a load test, write the response time for each request")
+	summary = flag.Bool("summary", true, "when running a load test, display a summary at the end")
 	duration = flag.Float64("duration", 300, "when running a load test, the duration in seconds")
 	maximumClients = flag.Int("maximum-clients", 10, "when running a load test, the maximum amount of clients")
 
