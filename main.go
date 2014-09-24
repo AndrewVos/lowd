@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httputil"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -46,7 +47,7 @@ func (t *Timer) Stop() {
 	t.Running = false
 }
 
-func launchRecorder(port int) {
+func launchRecorder() {
 	timer := &Timer{}
 	defer timer.Stop()
 
@@ -54,23 +55,37 @@ func launchRecorder(port int) {
 	proxy.OnRequest().HandleConnect(goproxy.AlwaysMitm)
 
 	proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		if timer.Running == false {
-			timer.Start()
-		}
+		if shouldRecordURL(req.URL) {
+			if timer.Running == false {
+				timer.Start()
+			}
 
-		fmt.Printf(colour.Yellow("%v %v\n"), req.Method, req.URL)
-		err := storeRequest(timer.Current, req)
-		if err != nil {
-			log.Fatal("Error storing request:", err)
+			fmt.Printf(colour.Yellow("%v %v\n"), req.Method, req.URL)
+			err := storeRequest(timer.Current, req)
+			if err != nil {
+				log.Fatal("Error storing request:", err)
+			}
 		}
 
 		return req, nil
 	})
 
 	// proxy.Verbose = true
-	fmt.Printf("Starting recorder on %v\n", port)
+	fmt.Printf("Starting recorder on %v\n", *port)
 
-	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(port), proxy))
+	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(*port), proxy))
+}
+
+func shouldRecordURL(url *url.URL) bool {
+	if *whitelist == "" {
+		return true
+	}
+	for _, host := range strings.Split(*whitelist, ",") {
+		if strings.Contains(url.Host, host) {
+			return true
+		}
+	}
+	return false
 }
 
 func runLoadTest() {
@@ -265,6 +280,8 @@ func singleClientTest(clientNumber int, clientResults chan ClientResult, storedR
 	clientResults <- clientResult
 }
 
+var port *int
+var whitelist *string
 var writeResponseHeaders *bool
 var writeResponseBody *bool
 var writeResponseTime *bool
@@ -276,8 +293,9 @@ func main() {
 	record := flag.Bool("record", false, "start the proxy recorder")
 	test := flag.Bool("test", false, "start a load test")
 	coloursEnabled := flag.Bool("colour", true, "write output in colour")
-	port := flag.Int("port", 8090, "when recording, the port to bind to")
 
+	port = flag.Int("port", 8090, "when recording, the port to bind to")
+	whitelist = flag.String("whitelist", "", "when recording, a comma seperated whitelist of url matches")
 	writeResponseHeaders = flag.Bool("write-response-headers", false, "when running a load test, write the response headers out")
 	writeResponseBody = flag.Bool("write-response-body", false, "when running a load test, write the response body out")
 	writeResponseTime = flag.Bool("write-response-time", true, "when running a load test, write the response time for each request")
@@ -293,7 +311,7 @@ func main() {
 		flag.Usage()
 	}
 	if *record {
-		launchRecorder(*port)
+		launchRecorder()
 	} else if *test {
 		runLoadTest()
 	}
