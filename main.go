@@ -113,7 +113,7 @@ func runLoadTest() {
 		currentClients -= 1
 		fmt.Println(fmt.Sprintf(colour.Green("Client #%v"), clientResult.ClientNumber))
 		for _, requestResult := range clientResult.Results {
-			fmt.Println(colour.Yellow(requestResult.Title))
+			fmt.Println(colour.Yellow(requestResult.Title()))
 			if requestResult.Error != nil {
 				fmt.Printf(colour.Red("Error during request:\n%v\n"), err)
 			}
@@ -161,23 +161,22 @@ func printSummary(allClientResults []ClientResult) {
 	fastestResponseTimes := map[string]time.Duration{}
 	slowestResponseTimes := map[string]time.Duration{}
 	for _, requestResult := range allRequestResults {
-		if v, ok := fastestResponseTimes[requestResult.Title]; ok {
+		if v, ok := fastestResponseTimes[requestResult.Title()]; ok {
 			if requestResult.ResponseTime < v {
-				fastestResponseTimes[requestResult.Title] = requestResult.ResponseTime
+				fastestResponseTimes[requestResult.Title()] = requestResult.ResponseTime
 			}
 		} else {
-			fastestResponseTimes[requestResult.Title] = requestResult.ResponseTime
+			fastestResponseTimes[requestResult.Title()] = requestResult.ResponseTime
 		}
 
-		if v, ok := slowestResponseTimes[requestResult.Title]; ok {
+		if v, ok := slowestResponseTimes[requestResult.Title()]; ok {
 			if requestResult.ResponseTime > v {
-				slowestResponseTimes[requestResult.Title] = requestResult.ResponseTime
+				slowestResponseTimes[requestResult.Title()] = requestResult.ResponseTime
 			}
 		} else {
-			slowestResponseTimes[requestResult.Title] = requestResult.ResponseTime
+			slowestResponseTimes[requestResult.Title()] = requestResult.ResponseTime
 		}
 	}
-	fmt.Println("Response times per URL")
 	for title, value := range fastestResponseTimes {
 		fastest := fmt.Sprintf(colour.Green("fastest: %s"), value)
 		slowest := fmt.Sprintf(colour.Red("slowest: %s"), slowestResponseTimes[title])
@@ -197,11 +196,17 @@ type ClientResult struct {
 }
 
 type RequestResult struct {
-	Title        string
+	Method       string
+	StatusCode   int
+	URL          string
 	Error        error
 	Headers      string
 	Body         string
 	ResponseTime time.Duration
+}
+
+func (r RequestResult) Title() string {
+	return fmt.Sprintf("%v %v %v", r.StatusCode, r.Method, r.URL)
 }
 
 func singleClientTest(clientNumber int, clientResults chan ClientResult, storedRequests []Request) {
@@ -220,7 +225,8 @@ func singleClientTest(clientNumber int, clientResults chan ClientResult, storedR
 		for {
 			if storedRequest.Time <= timer.Current {
 				result := RequestResult{
-					Title: fmt.Sprintf("%v %v", storedRequest.Method, storedRequest.URL),
+					Method: storedRequest.Method,
+					URL:    storedRequest.URL,
 				}
 				request, err := http.NewRequest(storedRequest.Method, storedRequest.URL, strings.NewReader(storedRequest.Body))
 				if err != nil {
@@ -232,6 +238,8 @@ func singleClientTest(clientNumber int, clientResults chan ClientResult, storedR
 					result.Error = err
 					break
 				}
+
+				result.StatusCode = response.StatusCode
 
 				r, err := httputil.DumpResponse(response, false)
 				if err != nil {
